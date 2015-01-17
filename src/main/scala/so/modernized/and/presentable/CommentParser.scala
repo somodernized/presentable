@@ -1,18 +1,29 @@
+// **Presentable** is a literate programming framework for scala, inspired by
+// [Docco](todo link) and friends. It takes scala source files and generates
+// snazzy webpages, respecting scaladocs and using [markdown](todo link) to
+// decorate non-scaladoc comments
+
 package so.modernized.and.presentable
 
 import scala.io.Source
 import scala.util.parsing.combinator.RegexParsers
 
+/* This is where the magic happens, *CommentParser* uses scala's parser
+ * combinators to parse scala source files and generate the basic structure of
+ * our pages
+ */
 object CommentParser extends RegexParsers {
-  override val skipWhitespace = false
+  override val skipWhitespace = false // we care about newlines and indents
 
+  // regexes to match parts of comments
   val singlelineCommentStart:Parser[String] = "//"
   val multilineCommentStart:Parser[String] = """/\*""".r
-  val scalaDocCommentStart:Parser[String] = """/\*\*""".r
+  val scalaDocCommentStart:Parser[String] = """/\*\*""".r // Since we want to treat these differently
   val multilineStart = """\s+\*\s?(?!/)""".r.?
   val multilineEnd:Parser[String] = """\s*\*/""".r
-  val commentText:Parser[String] = "(.*?)(?=\\*/|\n|\\z)".r("content")
+  val commentText:Parser[String] = "(.*?)(?=\\*/|\n|\\z)".r
 
+  // regexes for different kinds of whitespace
   val spaces:Parser[String] = "( |\t)*".r
   val eol:Parser[String] = "\n"
   val eof:Parser[String] = "\\z".r
@@ -30,14 +41,15 @@ object CommentParser extends RegexParsers {
 
   val comment = spaces ~> (singleMultilineCommentText | scalaDocCommentText | multilineCommentText | singleLineComments)
 
+  // we need to care about strings since comment characters inside them don't count
   val singleLineString:Parser[String] = "\".*\"".r
   val multilineString:Parser[String] = "(?s)\"\"\".*?\"\"\"".r
   val string = multilineString | singleLineString
 
-  val codeText:Parser[String] = "(.+?)(?=//|/\\*|\n|\\z|\")".r("contents")  //<~ guard(comment | eof)
+  val codeText:Parser[String] = "(.+?)(?=//|/\\*|\n|\\z|\")".r //<~ guard(comment | eof)
 
-  val codeLine = (string.? ~ codeText ~ string.?).+ <~ (eol | eof) ^^ (_.map{case ~(~(a, b), c) => a.getOrElse("") + b + c.getOrElse("")})
-  val codeBlock = codeLine.+ ^^ {_.mkString("\n")}
+  val codeLine = (string.? ~ codeText ~ string.?).+ <~ (eol | eof) ^^ (_.map{case ~(~(a, b), c) => a.getOrElse("") + b + c.getOrElse("")}.mkString(""))
+  val codeBlock = (codeLine ~ singleLineCommentText.?).+ //^^ {_.mkString("\n")}
 
 
   val doc = (comment.* ~ codeLine).*
@@ -89,7 +101,7 @@ object CommentParser extends RegexParsers {
     //println(parseAll(comment ~ codeBlock, s3))
     //println(parseAll(multilineCommentStart ~ eol.? ~> (multilineStart ~> commentText <~ eol).* ~ commentText.? <~ multilineEnd, s7))
     val sourceText = Source.fromFile(args(0)).mkString
-    val res = parseAll((comment.* ~ (codeBlock <~ eol.*)).*, sourceText)
+    val res = parseAll(((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).*, sourceText)
     println(res)
   }
 }
