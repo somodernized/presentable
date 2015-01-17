@@ -7,6 +7,28 @@ package so.modernized.and.presentable
 
 import scala.io.Source
 import scala.util.parsing.combinator.RegexParsers
+import scala.collection.mutable
+
+// a case class that stores code and its corresponding commentary. Each file
+// will become a list of these. Some will lack either commentary or code.
+case class Section(commentary:Option[String], code:Option[String])
+
+object Section {
+  // groups together sections within the seq that are currently uncommented
+  def foldOnCommentary(secs:Seq[Section]) = { // todo this definitely doesn't work
+    val res = mutable.ArrayBuffer[Section]()
+    var (toCollapse, remainder) = secs.span(_.commentary.isEmpty)
+    res += Section(None, toCollapse.flatMap(_.commentary).mkString("\n"))
+    res += remainder.head
+    while(remainder.nonEmpty) {
+      (toCollapse, remainder) = remainder.tail.span(_.commentary.isEmpty)
+      res += Section(None, toCollapse.flatMap(_.commentary).mkString("\n"))
+      res += remainder.head
+    }
+    res
+  }
+}
+
 
 /* This is where the magic happens, *CommentParser* uses scala's parser
  * combinators to parse scala source files and generate the basic structure of
@@ -48,8 +70,15 @@ object CommentParser extends RegexParsers {
 
   val codeText:Parser[String] = "(.+?)(?=//|/\\*|\n|\\z|\")".r //<~ guard(comment | eof)
 
-  val codeLine = (string.? ~ codeText ~ string.?).+ <~ (eol | eof) ^^ (_.map{case ~(~(a, b), c) => a.getOrElse("") + b + c.getOrElse("")}.mkString(""))
-  val codeBlock = (codeLine ~ singleLineCommentText.?).+ //^^ {_.mkString("\n")}
+  val codeLine = (string.? ~ codeText ~ string.? ~ singleLineCommentText.?).+ <~ (eol | eof) ^^ (_.map{
+    case ~(~(~(str1, code), str2), lineEndComment) =>
+    val line = Seq(str1, code, str2).flatten.mkString("")
+    lineEndComment match {
+      case Some(cmnt) => Left(Section(lineEndComment, Option(line)))
+      case None => Right(line)
+    }
+  })
+  val codeBlock = codeLine.+ ^^ {_.flatten}
 
 
   val doc = (comment.* ~ codeLine).*
@@ -91,6 +120,8 @@ object CommentParser extends RegexParsers {
              |         Produces HTML pages that displays your comments alongside your code.
              |****************************************************************************************/""".stripMargin
 
+  val s8 = """override val skipWhitespace = false // we care about newlines and indents"""
+
   def main(args:Array[String]) {
 
     /*
@@ -98,10 +129,11 @@ object CommentParser extends RegexParsers {
       println(parse(comment, i))  //<~ eol.?) ~ multilineStart ~ text ~ eol ~ multilineStart ~ text ~ eol ~ text, i))
     }
       */
+    println(parse(codeLine, s8))
     //println(parseAll(comment ~ codeBlock, s3))
     //println(parseAll(multilineCommentStart ~ eol.? ~> (multilineStart ~> commentText <~ eol).* ~ commentText.? <~ multilineEnd, s7))
-    val sourceText = Source.fromFile(args(0)).mkString
-    val res = parseAll(((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).*, sourceText)
-    println(res)
+    //val sourceText = Source.fromFile(args(0)).mkString
+    //val res = parseAll(((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).*, sourceText)
+    //println(res)
   }
 }
