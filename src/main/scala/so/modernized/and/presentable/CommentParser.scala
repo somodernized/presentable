@@ -13,22 +13,6 @@ import scala.collection.mutable
 // will become a list of these. Some will lack either commentary or code.
 case class Section(commentary:Option[String], code:Option[String])
 
-object Section {
-  // groups together sections within the seq that are currently uncommented
-  def foldOnCommentary(secs:Seq[Section]) = { // todo this definitely doesn't work
-    val res = mutable.ArrayBuffer[Section]()
-    var (toCollapse, remainder) = secs.span(_.commentary.isEmpty)
-    res += Section(None, toCollapse.flatMap(_.commentary).mkString("\n"))
-    res += remainder.head
-    while(remainder.nonEmpty) {
-      (toCollapse, remainder) = remainder.tail.span(_.commentary.isEmpty)
-      res += Section(None, toCollapse.flatMap(_.commentary).mkString("\n"))
-      res += remainder.head
-    }
-    res
-  }
-}
-
 
 /* This is where the magic happens, *CommentParser* uses scala's parser
  * combinators to parse scala source files and generate the basic structure of
@@ -68,21 +52,75 @@ object CommentParser extends RegexParsers {
   val multilineString:Parser[String] = "(?s)\"\"\".*?\"\"\"".r
   val string = multilineString | singleLineString
 
-  val codeText:Parser[String] = "(.+?)(?=//|/\\*|\n|\\z|\")".r //<~ guard(comment | eof)
+  // we may also need to deal with the case of single \" chars
 
-  val codeLine = (string.? ~ codeText ~ string.? ~ singleLineCommentText.?).+ <~ (eol | eof) ^^ (_.map{
-    case ~(~(~(str1, code), str2), lineEndComment) =>
-    val line = Seq(str1, code, str2).flatten.mkString("")
-    lineEndComment match {
-      case Some(cmnt) => Left(Section(lineEndComment, Option(line)))
-      case None => Right(line)
+  val codeText:Parser[String] = "(?!//)(.+?)(?=//|/\\*|\n|\\z|\")".r //<~ guard(comment | eof)
+
+  val codeLine = (string.? ~ codeText ~ string.?).+ ~ singleLineCommentText.?  ^^ {case ~(lineBits, cmntStringOpt) =>
+    val composedLine = lineBits.flatMap{case ~(~(s1Opt, cdeBit), s2Opt) => Seq(s1Opt, Option(cdeBit), s2Opt).flatten}.mkString("")
+    cmntStringOpt match {
+      case Some(cmntString) => Left(Section(Option(composedLine), cmntStringOpt))
+      case None => Right(composedLine)
     }
+  }
+
+  val codeBlock = codeLine.+ ^^ { lines =>
+    val lineBuffer = mutable.ArrayBuffer[String]()
+    val collectedBlock = mutable.ArrayBuffer[Either[Section, String]]()
+    lines foreach {
+      case l @ Left(sec) =>
+        collectedBlock += Right(lineBuffer.mkString("\n"))
+        collectedBlock += l
+        lineBuffer.clear()
+      case Right(str) =>
+        lineBuffer += str
+    }
+    if(lineBuffer.nonEmpty) {
+      collectedBlock += Right(lineBuffer.mkString("\n"))
+    }
+    collectedBlock.toList
+  }
+
+  /*
+  { lines =>
+    val ei = lines.head
+    ei.r
+    var remainder = lines
+    while(remainder.nonEmpty) {
+      val tup = remainder.span(_.isRight)
+      remainder = tup._2
+      tup._1.map(_.r)
+    }
+  }
+  */
+
+  val doc = ((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).* ^^ (_.flatMap {
+    case ~(commentStrings, codeBlocks) =>
+      def collapseToCodeSections(coll:List[Either[Section, String]]) = coll map {
+        case Right(cs) => Section(None, Some(cs))
+        case Left(sec) => sec
+      }
+      val (commentsWithoutCode, attachableCommentList) = commentStrings.splitAt(commentStrings.size - 1)
+      commentsWithoutCode.map(s => Section(Some(s), None)).++(codeBlocks match {
+        case Right(codeString) :: rest => Section(attachableCommentList.headOption, Some(codeString)) :: collapseToCodeSections(rest)
+        case Left(sec) :: rest => Section(attachableCommentList.headOption, None) :: sec :: collapseToCodeSections(rest)
+      })
   })
-  val codeBlock = codeLine.+ ^^ {_.flatten}
 
-
-  val doc = (comment.* ~ codeLine).*
-
+    /*
+    map {case ~(commentStrings, codeBlocks) =>
+    def collapseToCodeSections(coll:List[Either[Section, String]]) = coll map {
+      case Right(cs) => Section(None, Some(cs))
+      case Left(sec) => sec
+    }
+    val (commentsWithoutCode, commentWithCode :: Nil) = commentStrings.splitAt(commentStrings.size - 1)
+    commentsWithoutCode.map(s => Section(Some(s), None)).++(codeBlocks match {
+      case Right(codeString) :: rest => Section(Some(commentWithCode), Some(codeString)) :: collapseToCodeSections(rest)
+      case Left(sec) :: rest => Section(Some(commentWithCode), None) :: sec :: collapseToCodeSections(rest)
+    })
+  }
+  }
+  */
   val s = """/**
             |  * Scaladoc item representing a param as described in the ScalaDoc
             |  * @param param the parameter name.
@@ -120,7 +158,7 @@ object CommentParser extends RegexParsers {
              |         Produces HTML pages that displays your comments alongside your code.
              |****************************************************************************************/""".stripMargin
 
-  val s8 = """override val skipWhitespace = false // we care about newlines and indents"""
+  val s8 = """override val skipWhitespace = false "//we care about newlines and indents" // we care about newlines and indents"""
 
   def main(args:Array[String]) {
 
@@ -129,11 +167,11 @@ object CommentParser extends RegexParsers {
       println(parse(comment, i))  //<~ eol.?) ~ multilineStart ~ text ~ eol ~ multilineStart ~ text ~ eol ~ text, i))
     }
       */
-    println(parse(codeLine, s8))
+    //println(parseAll(codeBlock, s8))
     //println(parseAll(comment ~ codeBlock, s3))
     //println(parseAll(multilineCommentStart ~ eol.? ~> (multilineStart ~> commentText <~ eol).* ~ commentText.? <~ multilineEnd, s7))
-    //val sourceText = Source.fromFile(args(0)).mkString
-    //val res = parseAll(((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).*, sourceText)
-    //println(res)
+    val sourceText = Source.fromFile(args(0)).mkString
+    val res = parseAll(doc, sourceText)
+    println(res)
   }
 }
