@@ -64,7 +64,7 @@ object CommentParser extends RegexParsers {
     }
   }
 
-  val codeBlock = codeLine.+ ^^ { lines =>
+  val codeBlock = (codeLine <~ eol.?).+ ^^ { lines =>
     val lineBuffer = mutable.ArrayBuffer[String]()
     val collectedBlock = mutable.ArrayBuffer[Either[Section, String]]()
     lines foreach {
@@ -94,7 +94,7 @@ object CommentParser extends RegexParsers {
   }
   */
 
-  val doc = ((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).* ^^ (_.flatMap {
+  val doc = ((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).* <~ eof ^^ (_.flatMap {
     case ~(commentStrings, codeBlocks) =>
       def collapseToCodeSections(coll:List[Either[Section, String]]) = coll map {
         case Right(cs) => Section(None, Some(cs))
@@ -160,6 +160,19 @@ object CommentParser extends RegexParsers {
 
   val s8 = """override val skipWhitespace = false "//we care about newlines and indents" // we care about newlines and indents"""
 
+  val s9 = """val doc = ((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).* ^^ (_.flatMap {
+             |    case ~(commentStrings, codeBlocks) =>
+             |      def collapseToCodeSections(coll:List[Either[Section, String]]) = coll map {
+             |        case Right(cs) => Section(None, Some(cs))
+             |        case Left(sec) => sec
+             |      }
+             |      val (commentsWithoutCode, attachableCommentList) = commentStrings.splitAt(commentStrings.size - 1)
+             |      commentsWithoutCode.map(s => Section(Some(s), None)).++(codeBlocks match {
+             |        case Right(codeString) :: rest => Section(attachableCommentList.headOption, Some(codeString)) :: collapseToCodeSections(rest)
+             |        case Left(sec) :: rest => Section(attachableCommentList.headOption, None) :: sec :: collapseToCodeSections(rest)
+             |      })
+             |  })""".stripMargin
+
   def main(args:Array[String]) {
 
     /*
@@ -168,7 +181,7 @@ object CommentParser extends RegexParsers {
     }
       */
     //println(parseAll(codeBlock, s8))
-    //println(parseAll(comment ~ codeBlock, s3))
+    //println(parseAll(codeBlock, s9))
     //println(parseAll(multilineCommentStart ~ eol.? ~> (multilineStart ~> commentText <~ eol).* ~ commentText.? <~ multilineEnd, s7))
     val sourceText = Source.fromFile(args(0)).mkString
     val res = parseAll(doc, sourceText)
