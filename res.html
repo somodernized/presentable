@@ -1,0 +1,134 @@
+<!DOCTYPE html><html><head><script src="http://cdnjs.cloudflare.com/ajax/libs/prettify/r224/prettify.js" type="text/javascript"></script><script src="https://google-code-prettify.googlecode.com/svn/trunk/src/lang-scala.js" type="text/javascript"></script><link rel="stylesheet" type="text/css" href="file:///Users/johnsullivan/dev/presentable/style.css" /></head><table cellpadding="0" cellspacing="0"><tbody><tr id="section_0"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_0">⋅</a></div><h1>Presentable</h1>
+<p>is a literate programming framework for scala, inspired by
+ (Docco)[http://jashkenas.github.io/docco/],
+ (Marginalia)[https://github.com/gdeer81/marginalia] and friends. It takes
+ scala source files and generates snazzy webpages, respecting scaladocs and
+ using (markdown)[http://daringfireball.net/projects/markdown/] to decorate
+ non-scaladoc comments</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">package so.modernized.and.presentable</code></pre></td></tr><tr id="section_1"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_1">⋅</a></div><h2>Imports</h2>
+</td><td class="code"><pre><code class="prettyprint lang-scala">import scala.io.Source
+import scala.util.parsing.combinator.RegexParsers
+import scala.collection.mutable</code></pre></td></tr><tr id="section_2"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_2">⋅</a></div><p>a case class that stores code and its corresponding commentary. Each file
+ will become a list of these. Some will lack either commentary or code.</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">case class Section(commentary:Option[String], code:Option[String])</code></pre></td></tr><tr id="section_3"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_3">⋅</a></div><p>This is where the magic happens, <em>CommentParser</em> uses scala's parser
+ combinators to parse scala source files and generate the basic structure of
+ our pages</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">object CommentParser extends RegexParsers {</code></pre></td></tr><tr id="section_4"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_4">⋅</a></div> we care about newlines and indents</td><td class="code"><pre><code class="prettyprint lang-scala">  override val skipWhitespace = false </code></pre></td></tr><tr id="section_5"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_5">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala"></code></pre></td></tr><tr id="section_6"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_6">⋅</a></div> regexes to match parts of comments</td><td class="code"><pre><code class="prettyprint lang-scala">  </code></pre></td></tr><tr id="section_7"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_7">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val singlelineCommentStart:Parser[String] = "//"
+  val multilineCommentStart:Parser[String] = """/\*""".r</code></pre></td></tr><tr id="section_8"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_8">⋅</a></div> Since we want to treat these differently</td><td class="code"><pre><code class="prettyprint lang-scala">  val scalaDocCommentStart:Parser[String] = """/\*\*""".r </code></pre></td></tr><tr id="section_9"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_9">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val multilineStart = """\s+\*\s?(?!/)""".r.?
+  val multilineEnd:Parser[String] = """\s*\*/""".r
+  val commentText:Parser[String] = "(.*?)(?=\\*/|\n|\\z)".r</code></pre></td></tr><tr id="section_10"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_10">⋅</a></div><p>regexes for different kinds of whitespace</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">  val spaces:Parser[String] = "( |\t)*".r
+  val eol:Parser[String] = "\n"
+  val eof:Parser[String] = "\\z".r</code></pre></td></tr><tr id="section_11"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_11">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val multilineCommentText = ((multilineCommentStart ~ eol.?) ~> (multilineStart ~> commentText <~ eol).* ~ commentText <~ (multilineEnd ~ spaces ~ eol.?)) ^^ { case ~(cs, c) =>
+    (cs.mkString("\n") + (if (c.nonEmpty) "\n" + c else "")).markdown
+  }
+  val scalaDocCommentText = ((scalaDocCommentStart ~ eol.?) ~> (multilineStart ~> commentText <~ eol).* ~ commentText <~ (multilineEnd ~ spaces ~ eol.?)) ^^ { case ~(cs, c) =>
+    (cs.mkString("\n") + (if (c.nonEmpty) "\n" + c else "")).scalaDoc
+  }
+  val singleMultilineCommentText = multilineCommentStart ~> commentText <~ multilineEnd
+  val singleLineCommentText = singlelineCommentStart ~> commentText <~ eol.?</code></pre></td></tr><tr id="section_12"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_12">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val singleLineComments = singleLineCommentText.+ ^^ {_.mkString("\n").markdown}</code></pre></td></tr><tr id="section_13"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_13">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val comment = spaces ~> (singleMultilineCommentText | scalaDocCommentText | multilineCommentText | singleLineComments)</code></pre></td></tr><tr id="section_14"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_14">⋅</a></div><p>we need to care about strings since comment characters inside them don't count</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">  val singleLineString:Parser[String] = "\".*\"".r
+  val multilineString:Parser[String] = "(?s)\"\"\".*?\"\"\"".r
+  val string = multilineString | singleLineString</code></pre></td></tr><tr id="section_15"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_15">⋅</a></div><p>we may also need to deal with the case of single " chars</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala"></code></pre></td></tr><tr id="section_16"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_16">⋅</a></div><~ guard(comment | eof)</td><td class="code"><pre><code class="prettyprint lang-scala">  val codeText:Parser[String] = "(?!//)(.+?)(?=//|/\\*|\n|\\z|\")".r </code></pre></td></tr><tr id="section_17"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_17">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val codeLine = (string.? ~ codeText ~ string.?).+ ~ singleLineCommentText.?  ^^ {case ~(lineBits, cmntStringOpt) =>
+    val composedLine = lineBits.flatMap{case ~(~(s1Opt, cdeBit), s2Opt) => Seq(s1Opt, Option(cdeBit), s2Opt).flatten}.mkString("")
+    cmntStringOpt match {
+      case Some(cmntString) => Left(Section(cmntStringOpt, Option(composedLine)))
+      case None => Right(composedLine)
+    }
+  }</code></pre></td></tr><tr id="section_18"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_18">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val codeBlock = (codeLine <~ eol.?).+ ^^ { lines =>
+    val lineBuffer = mutable.ArrayBuffer[String]()
+    val collectedBlock = mutable.ArrayBuffer[Either[Section, String]]()
+    lines foreach {
+      case l @ Left(sec) =>
+        collectedBlock += Right(lineBuffer.mkString("\n"))
+        collectedBlock += l
+        lineBuffer.clear()
+      case Right(str) =>
+        lineBuffer += str
+    }
+    if(lineBuffer.nonEmpty) {
+      collectedBlock += Right(lineBuffer.mkString("\n"))
+    }
+    collectedBlock.toList
+  }</code></pre></td></tr><tr id="section_19"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_19">⋅</a></div><p>{ lines =></p>
+<pre><code>val ei = lines.head
+ei.r
+var remainder = lines
+while(remainder.nonEmpty) {
+  val tup = remainder.span(_.isRight)
+  remainder = tup._2
+  tup._1.map(_.r)
+}
+</code></pre>
+<p>}</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">  val doc = ((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).* <~ eof ^^ (_.flatMap {
+    case ~(commentStrings, codeBlocks) =>
+      def collapseToCodeSections(coll:List[Either[Section, String]]) = coll map {
+        case Right(cs) => Section(None, Some(cs))
+        case Left(sec) => sec
+      }
+      val (commentsWithoutCode, attachableCommentList) = commentStrings.splitAt(commentStrings.size - 1)
+      commentsWithoutCode.map(s => Section(Some(s), None)).++(codeBlocks match {
+        case Right(codeString) :: rest => Section(attachableCommentList.headOption, Some(codeString)) :: collapseToCodeSections(rest)
+        case Left(sec) :: rest => Section(attachableCommentList.headOption, None) :: sec :: collapseToCodeSections(rest)
+      })
+  })</code></pre></td></tr><tr id="section_20"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_20">⋅</a></div><pre><code>map {case ~(commentStrings, codeBlocks) =&gt;
+def collapseToCodeSections(coll:List[Either[Section, String]]) = coll map {
+  case Right(cs) =&gt; Section(None, Some(cs))
+  case Left(sec) =&gt; sec
+}
+val (commentsWithoutCode, commentWithCode :: Nil) = commentStrings.splitAt(commentStrings.size - 1)
+commentsWithoutCode.map(s =&gt; Section(Some(s), None)).++(codeBlocks match {
+  case Right(codeString) :: rest =&gt; Section(Some(commentWithCode), Some(codeString)) :: collapseToCodeSections(rest)
+  case Left(sec) :: rest =&gt; Section(Some(commentWithCode), None) :: sec :: collapseToCodeSections(rest)
+})
+</code></pre>
+<p>}
+ }</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">  val s = """/**
+            |  * Scaladoc item representing a param as described in the ScalaDoc
+            |  * @param param the parameter name.
+            |  * @param doc the documentation associated to this param.
+            |  */""".stripMargin</code></pre></td></tr><tr id="section_21"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_21">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s2 = """/* a single line comment */"""</code></pre></td></tr><tr id="section_22"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_22">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s3 =
+    """/** stuff
+      | * multiple lines of stuff
+      | * @param this, that
+      | * [java.lang.String]
+      | */
+      | case class Foo(bar:String)""".stripMargin</code></pre></td></tr><tr id="section_23"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_23">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s4 =
+    """// comment on a single line"""</code></pre></td></tr><tr id="section_24"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_24">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s5 =
+    """//Scalocco
+      |//---------------""".stripMargin</code></pre></td></tr><tr id="section_25"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_25">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s6 = "//"</code></pre></td></tr><tr id="section_26"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_26">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s7 = """/****************************************************************************************
+             | ______     ______     ______     __         ______     ______     ______     ______
+             |/\  ___\   /\  ___\   /\  __ \   /\ \       /\  __ \   /\  ___\   /\  ___\   /\  __ \
+             |\ \___  \  \ \ \____  \ \  __ \  \ \ \____  \ \ \/\ \  \ \ \____  \ \ \____  \ \ \/\ \
+             | \/\_____\  \ \_____\  \ \_\ \_\  \ \_____\  \ \_____\  \ \_____\  \ \_____\  \ \_____\
+             |  \/_____/   \/_____/   \/_/\/_/   \/_____/   \/_____/   \/_____/   \/_____/   \/_____/
+             |
+             |                         Scala implementation of Docco
+             |                         -----------------------------
+             |         Produces HTML pages that displays your comments alongside your code.
+             |****************************************************************************************/""".stripMargin</code></pre></td></tr><tr id="section_27"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_27">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s8 = """override val skipWhitespace = false "//we care about newlines and indents" // we care about newlines and indents"""</code></pre></td></tr><tr id="section_28"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_28">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  val s9 = """val doc = ((comment.* <~ eol.*) ~ (codeBlock <~ eol.*)).* ^^ (_.flatMap {
+             |    case ~(commentStrings, codeBlocks) =>
+             |      def collapseToCodeSections(coll:List[Either[Section, String]]) = coll map {
+             |        case Right(cs) => Section(None, Some(cs))
+             |        case Left(sec) => sec
+             |      }
+             |      val (commentsWithoutCode, attachableCommentList) = commentStrings.splitAt(commentStrings.size - 1)
+             |      commentsWithoutCode.map(s => Section(Some(s), None)).++(codeBlocks match {
+             |        case Right(codeString) :: rest => Section(attachableCommentList.headOption, Some(codeString)) :: collapseToCodeSections(rest)
+             |        case Left(sec) :: rest => Section(attachableCommentList.headOption, None) :: sec :: collapseToCodeSections(rest)
+             |      })
+             |  })""".stripMargin</code></pre></td></tr><tr id="section_29"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_29">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  def processDocText(docString:String) = parseAll(doc, docString)</code></pre></td></tr><tr id="section_30"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_30">⋅</a></div></td><td class="code"><pre><code class="prettyprint lang-scala">  def main(args:Array[String]) {</code></pre></td></tr><tr id="section_31"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_31">⋅</a></div><pre><code>Seq(s,s2, s3, s4, s5, s6, s7) foreach { i =&gt;
+  println(parse(comment, i))  //&lt;~ eol.?) ~ multilineStart ~ text ~ eol ~ multilineStart ~ text ~ eol ~ text, i))
+}
+</code></pre>
+</td><td class="code"><pre><code class="prettyprint lang-scala"></code></pre></td></tr><tr id="section_32"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_32">⋅</a></div><p>println(parseAll(codeBlock, s8))</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala"></code></pre></td></tr><tr id="section_33"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_33">⋅</a></div><p>println(parseAll(codeBlock, s9))</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala"></code></pre></td></tr><tr id="section_34"><td class="docs"><div class="pilwrap"><a class="pilcrow" href="#section_34">⋅</a></div><p>println(parseAll(multilineCommentStart ~ eol.? ~> (multilineStart ~> commentText &lt;~ eol).* ~ commentText.? &lt;~ multilineEnd, s7))</p>
+</td><td class="code"><pre><code class="prettyprint lang-scala">    val sourceText = Source.fromFile(args(0)).mkString
+    val res = parseAll(doc, sourceText)
+    println(res)
+  }
+}</code></pre></td></tr></tbody></table></html>

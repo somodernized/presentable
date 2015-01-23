@@ -1,10 +1,14 @@
-// **Presentable** is a literate programming framework for scala, inspired by
-// [Docco](todo link) and friends. It takes scala source files and generates
-// snazzy webpages, respecting scaladocs and using [markdown](todo link) to
-// decorate non-scaladoc comments
+// #Presentable
+// is a literate programming framework for scala, inspired by
+// (Docco)[http://jashkenas.github.io/docco/],
+// (Marginalia)[https://github.com/gdeer81/marginalia] and friends. It takes
+// scala source files and generates snazzy webpages, respecting scaladocs and
+// using (markdown)[http://daringfireball.net/projects/markdown/] to decorate
+// non-scaladoc comments
 
 package so.modernized.and.presentable
 
+// ##Imports
 import scala.io.Source
 import scala.util.parsing.combinator.RegexParsers
 import scala.collection.mutable
@@ -59,7 +63,7 @@ object CommentParser extends RegexParsers {
   val codeLine = (string.? ~ codeText ~ string.?).+ ~ singleLineCommentText.?  ^^ {case ~(lineBits, cmntStringOpt) =>
     val composedLine = lineBits.flatMap{case ~(~(s1Opt, cdeBit), s2Opt) => Seq(s1Opt, Option(cdeBit), s2Opt).flatten}.mkString("")
     cmntStringOpt match {
-      case Some(cmntString) => Left(Section(Option(composedLine), cmntStringOpt))
+      case Some(cmntString) => Left(Section(cmntStringOpt, Option(composedLine)))
       case None => Right(composedLine)
     }
   }
@@ -172,6 +176,8 @@ object CommentParser extends RegexParsers {
              |        case Left(sec) :: rest => Section(attachableCommentList.headOption, None) :: sec :: collapseToCodeSections(rest)
              |      })
              |  })""".stripMargin
+
+  def processDocText(docString:String) = parseAll(doc, docString)
 
   def main(args:Array[String]) {
 
