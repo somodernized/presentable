@@ -3,7 +3,6 @@ package so.modernized.and.presentable
 import scala.io.Source
 import java.io.{File, BufferedWriter, FileWriter}
 import scalatags.Text.all._
-import java.net.URL
 
 /* The renderer is responsible for taking a list of Sections that have been
  * parsed from a scala source file and generating an html from them.

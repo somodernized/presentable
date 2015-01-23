@@ -12,7 +12,7 @@ package object presentable {
     def markdown = (md process s).replaceAll("<br[ |\t]+/>"," ")
 
     //todo implement some function to provide scaladoccin'
-    def scalaDoc = "Scaladoc of:\n" + s
+    def scalaDoc = ScaladocParser docify s
   }
 
 }
